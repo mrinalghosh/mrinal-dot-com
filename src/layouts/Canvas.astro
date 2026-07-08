@@ -27,8 +27,9 @@ const fullTitle = title ? `${title} — mrinal` : 'mrinal';
     <ClientRouter />
   </head>
   <body>
-    <!-- the fridge: physical objects that stay put as you navigate -->
-    <MagnetLayer transition:persist="magnets" />
+    <!-- the fridge: physical objects that stay put as you navigate
+         (transition:persist lives on the layer's own div in MagnetLayer) -->
+    <MagnetLayer />
 
     <main class={canvas ? 'canvas' : undefined}>
       <slot />

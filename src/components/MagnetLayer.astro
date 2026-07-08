@@ -5,27 +5,36 @@
  * Lives in one persistent layer (transition:persist in the layout) so they
  * stay put as you move between pages — like magnets that never leave the fridge.
  *
- * Add a magnet by dropping a PNG in /public/magnets and adding a row here.
- * `x`/`y` are default positions in viewport %, `w` is display width in px,
- * `r` is a resting tilt in degrees. Users' dragged positions override these.
+ * Add a magnet: drop a PNG in /public/magnets and add a row here.
+ *   x/y = default position in viewport %, w = display width px, r = resting tilt.
+ *
+ * Combine to navigate: list a pair (or more) in `combos` below. When those
+ * magnets are dragged so they overlap and you release, the site navigates.
  */
 const magnets = [
-  { id: 'house', src: '/magnets/house.png', alt: 'a small stone house', x: 47, y: 45, w: 190, r: -3 },
-  { id: 'roof',  src: '/magnets/roof.png',  alt: 'a stone roof',        x: 47, y: 25, w: 150, r: 4 },
+  { id: 'house', src: '/magnets/house.png', alt: 'a small stone house', x: 47, y: 46, w: 155, r: -3 },
+  { id: 'roof',  src: '/magnets/roof.png',  alt: 'a stone roof',        x: 47, y: 27, w: 120, r: 4 },
+];
+
+// which combinations lead where (edit hrefs freely; add more pairs as you add art)
+const combos = [
+  { parts: ['house', 'roof'], href: '/about', label: 'about' },
 ];
 ---
 
-<div id="magnet-layer" aria-label="draggable objects">
+<div id="magnet-layer" transition:persist="magnets" aria-label="draggable objects" data-combos={JSON.stringify(combos)}>
   {magnets.map((m) => (
     <img
       class="magnet"
       data-magnet={m.id}
+      data-tilt={m.r}
       src={m.src}
       alt={m.alt}
       draggable="false"
       style={`left:${m.x}%; top:${m.y}%; width:${m.w}px; --tilt:${m.r}deg;`}
     />
   ))}
+  <div id="combine-hint" aria-hidden="true"></div>
 </div>
 
 <style>
@@ -46,24 +55,55 @@ const magnets = [
     transform: rotate(var(--tilt, 0deg));
     transition: transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1), filter 0.18s ease;
     will-change: left, top;
-    /* a soft contact shadow that reads as "resting on the surface" */
-    filter: drop-shadow(0 2px 3px rgba(30, 26, 20, 0.16));
   }
-  .magnet:hover {
-    transform: rotate(var(--tilt, 0deg)) scale(1.02);
-  }
+  .magnet:hover { transform: rotate(var(--tilt, 0deg)) scale(1.02); }
   .magnet.dragging {
     cursor: grabbing;
-    transform: rotate(var(--tilt, 0deg)) scale(1.06);
-    filter: drop-shadow(0 12px 18px rgba(30, 26, 20, 0.28));
-    transition: filter 0.18s ease;   /* no position transition while dragging */
+    transform: rotate(var(--tilt, 0deg)) scale(1.05);
+    /* a lift shadow while held (the PNG carries its own resting shadow) */
+    filter: drop-shadow(0 12px 16px rgba(30, 26, 20, 0.32));
+    transition: filter 0.18s ease;
+  }
+  /* armed = release-now-to-navigate */
+  .magnet.armed {
+    filter: drop-shadow(0 0 0 rgba(0,0,0,0)) drop-shadow(0 0 7px rgba(70, 120, 200, 0.85));
+  }
+  .magnet.dragging.armed {
+    filter: drop-shadow(0 12px 16px rgba(30,26,20,0.3)) drop-shadow(0 0 8px rgba(70,120,200,0.9));
+  }
+
+  #combine-hint {
+    position: fixed;
+    left: 50%;
+    bottom: 1.5rem;
+    transform: translateX(-50%) translateY(6px);
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    background: rgba(25, 24, 23, 0.9);
+    color: #fcfcfa;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  #combine-hint.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .magnet { transition: none; }
   }
 </style>
 
 <script>
-  // Document-level delegation so it survives client-side navigations:
-  // this module runs once; the layer element persists via transition:persist.
+  import { navigate } from 'astro:transitions/client';
+
+  // Runs once per full page load; the layer element persists across
+  // client-side navigations (transition:persist), so state below survives too.
   const STORE_KEY = 'fridge-magnets-v2';
+  const HIT_ALPHA = 60;     // a pixel counts as "the object" above this alpha
+  const ARM_RATIO = 0.3;    // overlap (of the smaller magnet) needed to arm a combo
 
   type Pos = { x: number; y: number; z: number };
   const load = (): Record<string, Pos> => {
@@ -73,56 +113,144 @@ const magnets = [
   const positions = load();
   const save = () => localStorage.setItem(STORE_KEY, JSON.stringify(positions));
 
-  let topZ = 100;
-  const MARGIN = 32; // keep at least this many px on-screen after a resize
+  const magnetEl = (id: string) =>
+    document.querySelector<HTMLImageElement>(`.magnet[data-magnet="${id}"]`);
+  const hintEl = () => document.getElementById('combine-hint');
 
+  type Combo = { parts: string[]; href: string; label: string };
+  const combos: Combo[] = (() => {
+    try { return JSON.parse(document.getElementById('magnet-layer')?.dataset.combos || '[]'); }
+    catch { return []; }
+  })();
+
+  let topZ = 100;
+  const MARGIN = 32;
   const clamp = (el: HTMLElement, x: number, y: number) => {
     const w = el.offsetWidth, h = el.offsetHeight;
-    const maxX = window.innerWidth - MARGIN;
-    const maxY = window.innerHeight - MARGIN;
     return {
-      x: Math.min(Math.max(x, MARGIN - w), maxX),
-      y: Math.min(Math.max(y, MARGIN - h), maxY),
+      x: Math.min(Math.max(x, MARGIN - w), window.innerWidth - MARGIN),
+      y: Math.min(Math.max(y, MARGIN - h), window.innerHeight - MARGIN),
     };
   };
 
-  const applyStored = () => {
-    document.querySelectorAll<HTMLElement>('.magnet').forEach((el) => {
-      const id = el.dataset.magnet!;
-      const p = positions[id];
-      if (!p) return;
-      const c = clamp(el, p.x, p.y);
-      el.style.left = c.x + 'px';
-      el.style.top = c.y + 'px';
-      el.style.zIndex = String(p.z);
-      topZ = Math.max(topZ, p.z);
-    });
+  // --- pixel-accurate hit testing ----------------------------------------
+  // Draw each PNG to an offscreen canvas once and keep its alpha channel so
+  // we can tell "on the stone" from "on a transparent corner".
+  type AlphaMap = { w: number; h: number; data: Uint8ClampedArray };
+  const alphaMaps = new Map<string, AlphaMap>();
+  const buildMap = (img: HTMLImageElement) => {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) return;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.drawImage(img, 0, 0);
+    const rgba = ctx.getImageData(0, 0, w, h).data;
+    const alpha = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) alpha[i] = rgba[i * 4 + 3];
+    alphaMaps.set(img.dataset.magnet!, { w, h, data: alpha });
   };
-  applyStored();
+  document.querySelectorAll<HTMLImageElement>('.magnet').forEach((img) => {
+    if (img.complete && img.naturalWidth) buildMap(img);
+    else img.addEventListener('load', () => buildMap(img), { once: true });
+  });
 
-  // --- drag, via one set of delegated pointer listeners -------------------
+  // alpha at a client-space point, accounting for the magnet's tilt
+  const alphaAt = (el: HTMLElement, clientX: number, clientY: number): number => {
+    const map = alphaMaps.get(el.dataset.magnet!);
+    if (!map) return 255;                      // not ready → treat as solid
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const t = -((parseFloat(el.dataset.tilt || '0')) * Math.PI) / 180;
+    const dx = clientX - cx, dy = clientY - cy;
+    const lx = dx * Math.cos(t) - dy * Math.sin(t);   // inverse-rotate into local space
+    const ly = dx * Math.sin(t) + dy * Math.cos(t);
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const u = (lx + w / 2) / w, v = (ly + h / 2) / h; // 0..1 within the box
+    if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+    const px = Math.min(map.w - 1, Math.floor(u * map.w));
+    const py = Math.min(map.h - 1, Math.floor(v * map.h));
+    return map.data[py * map.w + px];
+  };
+
+  // topmost magnet whose *pixels* (not bounding box) are under the point
+  const magnetAt = (clientX: number, clientY: number): HTMLElement | null => {
+    for (const node of document.elementsFromPoint(clientX, clientY)) {
+      if (node instanceof HTMLElement && node.classList.contains('magnet')) {
+        if (alphaAt(node, clientX, clientY) > HIT_ALPHA) return node;
+      }
+    }
+    return null;
+  };
+
+  // --- restore saved positions -------------------------------------------
+  document.querySelectorAll<HTMLElement>('.magnet').forEach((el) => {
+    const p = positions[el.dataset.magnet!];
+    if (!p) return;
+    const c = clamp(el, p.x, p.y);
+    el.style.left = c.x + 'px';
+    el.style.top = c.y + 'px';
+    el.style.zIndex = String(p.z);
+    topZ = Math.max(topZ, p.z);
+  });
+
+  // --- combine detection --------------------------------------------------
+  const overlapRatio = (a: HTMLElement, b: HTMLElement): number => {
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const ix = Math.max(0, Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left));
+    const iy = Math.max(0, Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top));
+    const minArea = Math.min(ra.width * ra.height, rb.width * rb.height) || 1;
+    return (ix * iy) / minArea;
+  };
+
+  // which combo (if any) is satisfied while `el` is being dragged
+  const findArmed = (el: HTMLElement): Combo | null => {
+    const id = el.dataset.magnet!;
+    for (const combo of combos) {
+      if (!combo.parts.includes(id)) continue;
+      const partners = combo.parts.filter((p) => p !== id).map(magnetEl);
+      if (partners.every((p) => p && overlapRatio(el, p) >= ARM_RATIO)) return combo;
+    }
+    return null;
+  };
+
+  const setArmed = (combo: Combo | null) => {
+    document.querySelectorAll('.magnet.armed').forEach((m) => m.classList.remove('armed'));
+    const hint = hintEl();
+    if (combo) {
+      combo.parts.forEach((p) => magnetEl(p)?.classList.add('armed'));
+      if (hint) { hint.textContent = `release → ${combo.label}`; hint.classList.add('show'); }
+    } else if (hint) {
+      hint.classList.remove('show');
+    }
+  };
+
+  // --- drag ---------------------------------------------------------------
   let active: HTMLElement | null = null;
+  let armed: Combo | null = null;
   let startX = 0, startY = 0, originX = 0, originY = 0;
 
   document.addEventListener('pointerdown', (e) => {
-    const el = (e.target as HTMLElement)?.closest<HTMLElement>('.magnet');
-    if (!el) return;
+    const el = magnetAt(e.clientX, e.clientY);
+    if (!el) return;                      // clicked a transparent corner / empty space
     active = el;
-    // offsetLeft/Top = true layout position in px (unaffected by the tilt
-    // transform, and resolves the default `%` to px) — avoids a start jump.
-    originX = el.offsetLeft;
+    armed = null;
+    originX = el.offsetLeft;              // true layout px, tilt-independent
     originY = el.offsetTop;
     startX = e.clientX;
     startY = e.clientY;
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add('dragging');
-    el.style.zIndex = String(++topZ);   // bring to front
+    el.style.zIndex = String(++topZ);
   });
 
   document.addEventListener('pointermove', (e) => {
     if (!active) return;
     active.style.left = originX + (e.clientX - startX) + 'px';
     active.style.top = originY + (e.clientY - startY) + 'px';
+    armed = findArmed(active);
+    setArmed(armed);
   });
 
   const end = () => {
@@ -130,12 +258,18 @@ const magnets = [
     const el = active;
     active = null;
     el.classList.remove('dragging');
+    // offsetLeft/Top = resolved px (correct even for a no-move tap, where
+    // style.left is still the default "47%" — parseFloat would teleport it)
     positions[el.dataset.magnet!] = {
-      x: parseFloat(el.style.left),
-      y: parseFloat(el.style.top),
+      x: el.offsetLeft,
+      y: el.offsetTop,
       z: parseInt(el.style.zIndex) || topZ,
     };
     save();
+    const combo = armed;
+    armed = null;
+    setArmed(null);
+    if (combo) navigate(combo.href);      // combined → go
   };
   document.addEventListener('pointerup', end);
   document.addEventListener('pointercancel', end);
