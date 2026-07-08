@@ -7,18 +7,36 @@
  *
  * Add a magnet: drop a PNG in /public/magnets and add a row here.
  *   x/y = default position in viewport %, w = display width px, r = resting tilt.
+ *   z   = fixed stacking order. Higher = always on top. This is a FIXED order
+ *         (grabbing does not bring to front), so pairs always assemble the same
+ *         way: roof over house, tools over the paper they land on.
  *
- * Combine to navigate: list a pair (or more) in `combos` below. When those
- * magnets are dragged so they overlap and you release, the site navigates.
+ * Combine to navigate: list the parts in `combos` below. When they overlap and
+ * you release, the site navigates. `fold: '<id>'` makes that part visually fold
+ * (squish) as the pair closes in — a placeholder for real fold art.
+ *
+ * The concept: `paper` is the hub. Bring a different tool to it to go somewhere.
  */
 const magnets = [
-  { id: 'house', src: '/magnets/house.png', alt: 'a small stone house', x: 47, y: 46, w: 155, r: -3 },
-  { id: 'roof',  src: '/magnets/roof.png',  alt: 'a stone roof',        x: 47, y: 27, w: 120, r: 4 },
+  // targets (low z) — things land on these
+  { id: 'house',    src: '/magnets/house.png',    alt: 'a small stone house', x: 46, y: 50, w: 155, r: -3, z: 10 },
+  { id: 'paper',    src: '/magnets/paper.png',    alt: 'a blank sheet of paper', x: 19, y: 40, w: 150, r: -5, z: 11 },
+  // movers (high z) — always ride on top
+  { id: 'roof',     src: '/magnets/roof.png',     alt: 'a stone roof',        x: 47, y: 34, w: 120, r: 4,  z: 20 },
+  { id: 'scissors', src: '/magnets/scissors.png', alt: 'a pair of scissors',  x: 70, y: 22, w: 100, r: 8,  z: 21 },
+  { id: 'pen',      src: '/magnets/pen.png',      alt: 'a fountain pen',      x: 72, y: 56, w: 130, r: -9, z: 22 },
+  { id: 'envelope', src: '/magnets/envelope.png', alt: 'an envelope',         x: 56, y: 74, w: 135, r: 3,  z: 23 },
+  { id: 'picture',  src: '/magnets/picture.png',  alt: 'a small photo',       x: 25, y: 68, w: 110, r: -6, z: 24 },
 ];
 
-// which combinations lead where (edit hrefs freely; add more pairs as you add art)
+// bring the right partner to the paper — each pair leads somewhere.
+// (house + roof is the odd one out: it just assembles the home icon.)
 const combos = [
-  { parts: ['house', 'roof'], href: '/about', label: 'about' },
+  { parts: ['house', 'roof'],     href: '/',        label: 'home' },
+  { parts: ['paper', 'scissors'], href: '/work',    label: 'work' },
+  { parts: ['paper', 'pen'],      href: '/writing', label: 'writing' },
+  { parts: ['paper', 'envelope'], href: '/contact', label: 'contact', fold: 'paper' },
+  { parts: ['paper', 'picture'],  href: '/about',   label: 'about' },
 ];
 ---
 
@@ -31,7 +49,7 @@ const combos = [
       src={m.src}
       alt={m.alt}
       draggable="false"
-      style={`left:${m.x}%; top:${m.y}%; width:${m.w}px; --tilt:${m.r}deg;`}
+      style={`left:${m.x}%; top:${m.y}%; width:${m.w}px; z-index:${m.z}; --tilt:${m.r}deg;`}
     />
   ))}
   <div id="combine-hint" aria-hidden="true"></div>
@@ -51,18 +69,23 @@ const combos = [
     user-select: none;
     -webkit-user-drag: none;
     touch-action: none;     /* we own the gesture; don't scroll while dragging */
-    cursor: grab;
-    transform: rotate(var(--tilt, 0deg));
+    /* no cursor here: the whole <img> is a rectangle, but only the opaque
+       pixels are grabbable. The grab cursor is set on #magnet-layer by JS
+       (and inherited) only while hovering real pixels — see setHover(). */
+    /* transform is composed from independent vars so the hover/drag lift and
+       the fold preview multiply instead of overwriting each other. */
+    transform: rotate(var(--tilt, 0deg)) scale(var(--lift, 1)) scaleX(var(--fold, 1));
     transition: transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1), filter 0.18s ease;
-    will-change: left, top;
+    will-change: transform, left, top;
   }
-  .magnet:hover { transform: rotate(var(--tilt, 0deg)) scale(1.02); }
+  /* .hot = pointer is over actual pixels (JS-toggled, not :hover, so the
+     lift doesn't pop when you're only over a transparent corner) */
+  .magnet.hot { --lift: 1.02; }
   .magnet.dragging {
+    --lift: 1.05;
     cursor: grabbing;
-    transform: rotate(var(--tilt, 0deg)) scale(1.05);
     /* a lift shadow while held (the PNG carries its own resting shadow) */
     filter: drop-shadow(0 12px 16px rgba(30, 26, 20, 0.32));
-    transition: filter 0.18s ease;
   }
   /* armed = release-now-to-navigate */
   .magnet.armed {
@@ -101,11 +124,12 @@ const combos = [
 
   // Runs once per full page load; the layer element persists across
   // client-side navigations (transition:persist), so state below survives too.
-  const STORE_KEY = 'fridge-magnets-v2';
+  const STORE_KEY = 'fridge-magnets-v3';   // v3: positions no longer store z (z is fixed in config)
   const HIT_ALPHA = 60;     // a pixel counts as "the object" above this alpha
   const ARM_RATIO = 0.3;    // overlap (of the smaller magnet) needed to arm a combo
+  const FOLD_MIN = 0.55;    // how far a folding part squishes at full overlap
 
-  type Pos = { x: number; y: number; z: number };
+  type Pos = { x: number; y: number };
   const load = (): Record<string, Pos> => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); }
     catch { return {}; }
@@ -113,17 +137,17 @@ const combos = [
   const positions = load();
   const save = () => localStorage.setItem(STORE_KEY, JSON.stringify(positions));
 
+  const layer = document.getElementById('magnet-layer')!;
   const magnetEl = (id: string) =>
     document.querySelector<HTMLImageElement>(`.magnet[data-magnet="${id}"]`);
   const hintEl = () => document.getElementById('combine-hint');
 
-  type Combo = { parts: string[]; href: string; label: string };
+  type Combo = { parts: string[]; href: string; label: string; fold?: string };
   const combos: Combo[] = (() => {
-    try { return JSON.parse(document.getElementById('magnet-layer')?.dataset.combos || '[]'); }
+    try { return JSON.parse(layer.dataset.combos || '[]'); }
     catch { return []; }
   })();
 
-  let topZ = 100;
   const MARGIN = 32;
   const clamp = (el: HTMLElement, x: number, y: number) => {
     const w = el.offsetWidth, h = el.offsetHeight;
@@ -184,15 +208,13 @@ const combos = [
     return null;
   };
 
-  // --- restore saved positions -------------------------------------------
+  // --- restore saved positions (z stays fixed from config) ---------------
   document.querySelectorAll<HTMLElement>('.magnet').forEach((el) => {
     const p = positions[el.dataset.magnet!];
     if (!p) return;
     const c = clamp(el, p.x, p.y);
     el.style.left = c.x + 'px';
     el.style.top = c.y + 'px';
-    el.style.zIndex = String(p.z);
-    topZ = Math.max(topZ, p.z);
   });
 
   // --- combine detection --------------------------------------------------
@@ -226,31 +248,67 @@ const combos = [
     }
   };
 
+  // --- fold preview -------------------------------------------------------
+  // A combo may name a part that visually folds (squishes) as the pair closes
+  // in — a stand-in for real fold-in art (e.g. paper tucking into an envelope).
+  // Driven continuously by how much the two parts overlap while dragging.
+  const clearFolds = () =>
+    document.querySelectorAll<HTMLElement>('.magnet').forEach((m) => m.style.removeProperty('--fold'));
+
+  const updateFold = (el: HTMLElement) => {
+    clearFolds();
+    const id = el.dataset.magnet!;
+    for (const combo of combos) {
+      if (!combo.fold || combo.parts.length !== 2 || !combo.parts.includes(id)) continue;
+      const a = magnetEl(combo.parts[0]), b = magnetEl(combo.parts[1]);
+      if (!a || !b) continue;
+      const t = Math.min(1, overlapRatio(a, b) / ARM_RATIO);   // fully folded by the time it arms
+      magnetEl(combo.fold)?.style.setProperty('--fold', String(1 - (1 - FOLD_MIN) * t));
+    }
+  };
+
   // --- drag ---------------------------------------------------------------
   let active: HTMLElement | null = null;
   let armed: Combo | null = null;
+  let hovered: HTMLElement | null = null;
   let startX = 0, startY = 0, originX = 0, originY = 0;
+
+  // Reflect the true (pixel-accurate) hitbox in the cursor + lift. The grab
+  // cursor lives on the layer and is inherited by whichever magnet is under
+  // the point, so it never shows over a transparent corner or empty space.
+  const setHover = (el: HTMLElement | null) => {
+    if (el !== hovered) {
+      hovered?.classList.remove('hot');
+      el?.classList.add('hot');
+      hovered = el;
+    }
+    layer.style.cursor = el ? 'grab' : '';
+  };
 
   document.addEventListener('pointerdown', (e) => {
     const el = magnetAt(e.clientX, e.clientY);
     if (!el) return;                      // clicked a transparent corner / empty space
     active = el;
     armed = null;
+    setHover(null);                       // drop the hover lift; 'dragging' takes over
     originX = el.offsetLeft;              // true layout px, tilt-independent
     originY = el.offsetTop;
     startX = e.clientX;
     startY = e.clientY;
     try { el.setPointerCapture(e.pointerId); } catch {}
-    el.classList.add('dragging');
-    el.style.zIndex = String(++topZ);
+    el.classList.add('dragging');         // z is fixed in config; grabbing does not reorder
   });
 
   document.addEventListener('pointermove', (e) => {
-    if (!active) return;
+    if (!active) {
+      setHover(magnetAt(e.clientX, e.clientY));   // just hovering
+      return;
+    }
     active.style.left = originX + (e.clientX - startX) + 'px';
     active.style.top = originY + (e.clientY - startY) + 'px';
     armed = findArmed(active);
     setArmed(armed);
+    updateFold(active);
   });
 
   const end = () => {
@@ -260,15 +318,12 @@ const combos = [
     el.classList.remove('dragging');
     // offsetLeft/Top = resolved px (correct even for a no-move tap, where
     // style.left is still the default "47%" — parseFloat would teleport it)
-    positions[el.dataset.magnet!] = {
-      x: el.offsetLeft,
-      y: el.offsetTop,
-      z: parseInt(el.style.zIndex) || topZ,
-    };
+    positions[el.dataset.magnet!] = { x: el.offsetLeft, y: el.offsetTop };
     save();
     const combo = armed;
     armed = null;
     setArmed(null);
+    clearFolds();                         // reset any fold before it persists across nav
     if (combo) navigate(combo.href);      // combined → go
   };
   document.addEventListener('pointerup', end);
