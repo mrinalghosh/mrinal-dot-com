@@ -1,0 +1,38 @@
+---
+import Canvas from '../layouts/Canvas.astro';
+---
+
+<Canvas canvas title={undefined} description="mrinal — a whiteboard.">
+  <!-- landing is intentionally bare: just the void and the magnets -->
+  <h1 class="sr-only">mrinal</h1>
+  <p class="hint" aria-hidden="true">drag the pieces around</p>
+</Canvas>
+
+<style>
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  /* a whisper of a hint — delete this <p> whenever it has served its purpose */
+  .hint {
+    position: fixed;
+    top: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    color: var(--ink-faint);
+    opacity: 0.7;
+    animation: fade 0.8s ease both;
+    pointer-events: none;
+    z-index: 1;
+  }
+  @keyframes fade { from { opacity: 0; } to { opacity: 0.7; } }
+</style>

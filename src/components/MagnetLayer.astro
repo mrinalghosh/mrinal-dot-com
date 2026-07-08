@@ -1,0 +1,153 @@
+---
+/*
+ * MagnetLayer — the physical objects that float on top of every page.
+ * They drag around, stack over each other, and remember where you left them.
+ * Lives in one persistent layer (transition:persist in the layout) so they
+ * stay put as you move between pages — like magnets that never leave the fridge.
+ *
+ * Add a magnet by dropping a PNG in /public/magnets and adding a row here.
+ * `x`/`y` are default positions in viewport %, `w` is display width in px,
+ * `r` is a resting tilt in degrees. Users' dragged positions override these.
+ */
+const magnets = [
+  { id: 'house', src: '/magnets/house.png', alt: 'a small stone house', x: 47, y: 45, w: 190, r: -3 },
+  { id: 'roof',  src: '/magnets/roof.png',  alt: 'a stone roof',        x: 47, y: 25, w: 150, r: 4 },
+];
+---
+
+<div id="magnet-layer" aria-label="draggable objects">
+  {magnets.map((m) => (
+    <img
+      class="magnet"
+      data-magnet={m.id}
+      src={m.src}
+      alt={m.alt}
+      draggable="false"
+      style={`left:${m.x}%; top:${m.y}%; width:${m.w}px; --tilt:${m.r}deg;`}
+    />
+  ))}
+</div>
+
+<style>
+  #magnet-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;   /* let clicks fall through to the page... */
+    overflow: hidden;
+  }
+  .magnet {
+    position: absolute;
+    pointer-events: auto;   /* ...except on the magnets themselves */
+    user-select: none;
+    -webkit-user-drag: none;
+    touch-action: none;     /* we own the gesture; don't scroll while dragging */
+    cursor: grab;
+    transform: rotate(var(--tilt, 0deg));
+    transition: transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1), filter 0.18s ease;
+    will-change: left, top;
+    /* a soft contact shadow that reads as "resting on the surface" */
+    filter: drop-shadow(0 2px 3px rgba(30, 26, 20, 0.16));
+  }
+  .magnet:hover {
+    transform: rotate(var(--tilt, 0deg)) scale(1.02);
+  }
+  .magnet.dragging {
+    cursor: grabbing;
+    transform: rotate(var(--tilt, 0deg)) scale(1.06);
+    filter: drop-shadow(0 12px 18px rgba(30, 26, 20, 0.28));
+    transition: filter 0.18s ease;   /* no position transition while dragging */
+  }
+</style>
+
+<script>
+  // Document-level delegation so it survives client-side navigations:
+  // this module runs once; the layer element persists via transition:persist.
+  const STORE_KEY = 'fridge-magnets-v2';
+
+  type Pos = { x: number; y: number; z: number };
+  const load = (): Record<string, Pos> => {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); }
+    catch { return {}; }
+  };
+  const positions = load();
+  const save = () => localStorage.setItem(STORE_KEY, JSON.stringify(positions));
+
+  let topZ = 100;
+  const MARGIN = 32; // keep at least this many px on-screen after a resize
+
+  const clamp = (el: HTMLElement, x: number, y: number) => {
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const maxX = window.innerWidth - MARGIN;
+    const maxY = window.innerHeight - MARGIN;
+    return {
+      x: Math.min(Math.max(x, MARGIN - w), maxX),
+      y: Math.min(Math.max(y, MARGIN - h), maxY),
+    };
+  };
+
+  const applyStored = () => {
+    document.querySelectorAll<HTMLElement>('.magnet').forEach((el) => {
+      const id = el.dataset.magnet!;
+      const p = positions[id];
+      if (!p) return;
+      const c = clamp(el, p.x, p.y);
+      el.style.left = c.x + 'px';
+      el.style.top = c.y + 'px';
+      el.style.zIndex = String(p.z);
+      topZ = Math.max(topZ, p.z);
+    });
+  };
+  applyStored();
+
+  // --- drag, via one set of delegated pointer listeners -------------------
+  let active: HTMLElement | null = null;
+  let startX = 0, startY = 0, originX = 0, originY = 0;
+
+  document.addEventListener('pointerdown', (e) => {
+    const el = (e.target as HTMLElement)?.closest<HTMLElement>('.magnet');
+    if (!el) return;
+    active = el;
+    // offsetLeft/Top = true layout position in px (unaffected by the tilt
+    // transform, and resolves the default `%` to px) — avoids a start jump.
+    originX = el.offsetLeft;
+    originY = el.offsetTop;
+    startX = e.clientX;
+    startY = e.clientY;
+    try { el.setPointerCapture(e.pointerId); } catch {}
+    el.classList.add('dragging');
+    el.style.zIndex = String(++topZ);   // bring to front
+  });
+
+  document.addEventListener('pointermove', (e) => {
+    if (!active) return;
+    active.style.left = originX + (e.clientX - startX) + 'px';
+    active.style.top = originY + (e.clientY - startY) + 'px';
+  });
+
+  const end = () => {
+    if (!active) return;
+    const el = active;
+    active = null;
+    el.classList.remove('dragging');
+    positions[el.dataset.magnet!] = {
+      x: parseFloat(el.style.left),
+      y: parseFloat(el.style.top),
+      z: parseInt(el.style.zIndex) || topZ,
+    };
+    save();
+  };
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+
+  // keep everything on-screen if the window shrinks
+  window.addEventListener('resize', () => {
+    document.querySelectorAll<HTMLElement>('.magnet').forEach((el) => {
+      const c = clamp(el, el.offsetLeft, el.offsetTop);
+      if (c.x !== el.offsetLeft || c.y !== el.offsetTop) {
+        el.style.left = c.x + 'px';
+        el.style.top = c.y + 'px';
+      }
+    });
+  });
+</script>

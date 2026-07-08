@@ -1,0 +1,29 @@
+---
+import Canvas from '../layouts/Canvas.astro';
+
+// edit these — they render as the list below
+const links = [
+  { label: 'email', href: 'mailto:mrinal.ghosh6198@gmail.com', text: 'mrinal.ghosh6198@gmail.com' },
+  { label: 'github', href: 'https://github.com/mrinalghosh', text: 'github.com/mrinalghosh' },
+  // { label: 'instagram', href: '', text: '' },
+];
+---
+
+<Canvas title="contact" description="Get in touch with Mrinal.">
+  <p class="eyebrow">contact</p>
+  <ul class="list contact">
+    {links.map((l) => (
+      <li>
+        <a href={l.href}>
+          <span class="title">{l.text}</span>
+          <span class="meta">{l.label}</span>
+        </a>
+      </li>
+    ))}
+  </ul>
+</Canvas>
+
+<style>
+  .contact .title { border-bottom: 1px solid var(--rule); }
+  .contact a:hover .title { border-bottom-color: var(--ink); }
+</style>

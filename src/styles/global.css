@@ -1,0 +1,112 @@
+/* ---------------------------------------------------------------------------
+   mrinal.com — a whiteboard.
+   Bare canvas, quiet type, physical objects (magnets) floating on top.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --paper: #fcfcfa;          /* not pure white — a hair of warmth, like real paper */
+  --ink: #191817;
+  --ink-soft: #6b6a67;
+  --ink-faint: #a6a5a1;
+  --rule: #e7e6e2;
+  --accent: #191817;
+
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --measure: 40rem;          /* comfortable reading width */
+}
+
+* { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.6;
+  letter-spacing: 0.1px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* --- page content column --------------------------------------------------- */
+main {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 14vh 1.5rem 6rem;
+  position: relative;
+  z-index: 1;               /* sits under the magnet layer */
+}
+
+/* the landing canvas has no content column — just the void + magnets */
+main.canvas {
+  max-width: none;
+  padding: 0;
+  min-height: 100vh;
+}
+
+h1, h2, h3 {
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  margin: 0 0 0.6em;
+}
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.15rem; margin-top: 2.4em; }
+
+p { margin: 0 0 1.2em; }
+
+a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+a:hover { border-bottom-color: var(--ink); }
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 2.5rem;
+}
+
+.lede { color: var(--ink-soft); }
+
+/* --- listing (writing / work) --------------------------------------------- */
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { padding: 1.1rem 0; border-top: 1px solid var(--rule); }
+.list li:last-child { border-bottom: 1px solid var(--rule); }
+.list a { border-bottom: none; display: flex; gap: 1rem; align-items: baseline; justify-content: space-between; }
+.list a:hover .title { border-bottom-color: var(--ink); }
+.list .title { border-bottom: 1px solid transparent; }
+.list .meta { font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-faint); white-space: nowrap; }
+
+/* --- article prose --------------------------------------------------------- */
+.prose :is(h2, h3) { margin-top: 2em; }
+.prose img { max-width: 100%; height: auto; border-radius: 2px; }
+.prose pre { overflow-x: auto; padding: 1rem; background: #f4f3ef; border-radius: 4px; font-size: 0.85rem; }
+.prose code { font-family: var(--font-mono); font-size: 0.88em; }
+.prose blockquote { margin: 1.4em 0; padding-left: 1rem; border-left: 2px solid var(--rule); color: var(--ink-soft); }
+.prose hr { border: none; border-top: 1px solid var(--rule); margin: 2.4em 0; }
+
+.backlink {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+  border-bottom: none;
+}
+.backlink:hover { color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

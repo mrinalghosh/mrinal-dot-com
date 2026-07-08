@@ -1,0 +1,39 @@
+---
+import { ClientRouter } from 'astro:transitions';
+import MagnetLayer from '../components/MagnetLayer.astro';
+import Nav from '../components/Nav.astro';
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  /** landing page: no reading column, just the bare canvas */
+  canvas?: boolean;
+}
+const { title, description, canvas = false } = Astro.props;
+const fullTitle = title ? `${title} — mrinal` : 'mrinal';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{fullTitle}</title>
+    {description && <meta name="description" content={description} />}
+    <meta name="generator" content={Astro.generator} />
+    <!-- client-side routing so the magnet layer can persist across pages -->
+    <ClientRouter />
+  </head>
+  <body>
+    <!-- the fridge: physical objects that stay put as you navigate -->
+    <MagnetLayer transition:persist="magnets" />
+
+    <main class={canvas ? 'canvas' : undefined}>
+      <slot />
+    </main>
+
+    <Nav />
+  </body>
+</html>

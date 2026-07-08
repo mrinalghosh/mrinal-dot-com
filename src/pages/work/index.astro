@@ -1,0 +1,60 @@
+---
+import { getCollection } from 'astro:content';
+import Canvas from '../../layouts/Canvas.astro';
+
+const KINDS = [
+  { key: 'touchdesigner', label: 'TouchDesigner' },
+  { key: 'glsl', label: 'GLSL / shaders' },
+  { key: 'origami', label: 'Origami' },
+  { key: 'laser', label: 'Laser cutting' },
+  { key: 'code', label: 'Code' },
+] as const;
+
+const items = (await getCollection('work', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+
+const groups = KINDS
+  .map((k) => ({ ...k, items: items.filter((i) => i.data.kind === k.key) }))
+  .filter((g) => g.items.length > 0);
+---
+
+<Canvas title="work" description="Real-time visuals, shaders, origami, laser cutting, and code.">
+  <p class="eyebrow">work</p>
+
+  {groups.length === 0 ? (
+    <p class="lede">Nothing here yet.</p>
+  ) : (
+    groups.map((group) => (
+      <section class="group">
+        <h2>{group.label}</h2>
+        <ul class="list">
+          {group.items.map((item) => (
+            <li>
+              <div class="work-row">
+                <span class="title">{item.data.title}</span>
+                {item.data.description && <span class="desc">{item.data.description}</span>}
+                {item.data.links.length > 0 && (
+                  <span class="links">
+                    {item.data.links.map((l) => (
+                      <a href={l.href}>{l.label}</a>
+                    ))}
+                  </span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))
+  )}
+</Canvas>
+
+<style>
+  .group { margin-bottom: 1rem; }
+  .work-row { display: flex; flex-direction: column; gap: 0.25rem; }
+  .work-row .title { font-weight: 520; }
+  .work-row .desc { color: var(--ink-soft); font-size: 0.95rem; }
+  .work-row .links { display: flex; gap: 1rem; margin-top: 0.25rem; }
+  .work-row .links a { font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-faint); border-bottom: none; }
+  .work-row .links a:hover { color: var(--ink); }
+</style>
