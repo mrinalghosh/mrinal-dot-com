@@ -379,19 +379,7 @@ const combos = [
     return null;
   };
 
-  // --- capture config defaults, then restore saved positions -------------
-  // Grab each magnet's server-rendered default (the "x%"/"y%" strings) BEFORE
-  // the restore loop overwrites left/top with saved px — otherwise the defaults
-  // are gone and a reset has nothing to snap back to.
-  const defaults = new Map<string, { left: string; top: string }>();
-  document.querySelectorAll<HTMLElement>(".magnet").forEach((el) => {
-    defaults.set(el.dataset.magnet!, {
-      left: el.style.left,
-      top: el.style.top,
-    });
-  });
-
-  // z stays fixed from config; only x/y are restored
+  // --- restore saved positions (z stays fixed from config) ---------------
   document.querySelectorAll<HTMLElement>(".magnet").forEach((el) => {
     const p = positions[el.dataset.magnet!];
     if (!p) return;
@@ -445,34 +433,6 @@ const combos = [
       }
     } else if (hint) {
       hint.classList.remove("show");
-    }
-  };
-
-  // --- reset to defaults --------------------------------------------------
-  // Double-clicking bare fridge (not a magnet, not to select text) eases every
-  // magnet back to its config position and forgets the saved layout.
-  const RESET_MS = 550; // matches .settling's left/top easing
-  const resetToDefaults = () => {
-    for (const k of Object.keys(positions)) delete positions[k];
-    localStorage.removeItem(STORE_KEY);
-    setArmed(null);
-    clearFolds();
-    document.querySelectorAll<HTMLElement>(".magnet").forEach((el) => {
-      const d = defaults.get(el.dataset.magnet!);
-      if (!d) return;
-      el.classList.remove("dragging", "armed");
-      el.classList.add("settling");
-      el.style.left = d.left; // back to the "x%"/"y%" strings — responsive again
-      el.style.top = d.top;
-      window.setTimeout(() => {
-        if (active !== el) el.classList.remove("settling");
-      }, RESET_MS);
-    });
-    const hint = hintEl();
-    if (hint) {
-      hint.textContent = "magnets reset";
-      hint.classList.add("show");
-      window.setTimeout(() => hint.classList.remove("show"), 900);
     }
   };
 
@@ -573,15 +533,6 @@ const combos = [
   };
   document.addEventListener("pointerup", end);
   document.addEventListener("pointercancel", end);
-
-  // double-click the bare fridge to reset. Skip if the point is on a magnet, or
-  // if the double-click just selected a word of page text (so reading isn't
-  // hijacked) — only an empty-space double-click resets.
-  document.addEventListener("dblclick", (e) => {
-    if (magnetAt(e.clientX, e.clientY)) return;
-    if (window.getSelection()?.toString().trim()) return;
-    resetToDefaults();
-  });
 
   // keep everything on-screen if the window shrinks
   window.addEventListener("resize", () => {
