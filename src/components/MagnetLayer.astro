@@ -17,6 +17,7 @@
  *
  * The concept: `paper` is the hub. Bring a different tool to it to go somewhere.
  */
+import { withBase } from '../lib/url';
 const magnets = [
   // targets (low z) — things land on these
   { id: 'house',    src: '/magnets/house-clean.png',    alt: 'a small stone house', x: 46, y: 50, w: 155, r: -3, z: 10 },
@@ -41,13 +42,13 @@ const combos = [
 ];
 ---
 
-<div id="magnet-layer" transition:persist="magnets" aria-label="draggable objects" data-combos={JSON.stringify(combos)}>
+<div id="magnet-layer" transition:persist="magnets" aria-label="draggable objects" data-combos={JSON.stringify(combos.map((c) => ({ ...c, href: withBase(c.href) })))}>
   {magnets.map((m) => (
     <img
       class="magnet"
       data-magnet={m.id}
       data-tilt={m.r}
-      src={m.src}
+      src={withBase(m.src)}
       alt={m.alt}
       draggable="false"
       style={`left:${m.x}%; top:${m.y}%; width:${m.w}px; z-index:${m.z}; --tilt:${m.r}deg;`}
@@ -71,8 +72,9 @@ const combos = [
     -webkit-user-drag: none;
     touch-action: none;     /* we own the gesture; don't scroll while dragging */
     /* no cursor here: the whole <img> is a rectangle, but only the opaque
-       pixels are grabbable. The grab cursor is set on #magnet-layer by JS
-       (and inherited) only while hovering real pixels — see setHover(). */
+       pixels (plus a small BUFFER halo) are grabbable. The grab cursor is set
+       on #magnet-layer by JS (and inherited) only while hovering the real
+       grabbable area — see setHover() / magnetAt(). */
     /* transform is composed from independent vars so the hover/drag lift and
        the fold preview multiply instead of overwriting each other. */
     transform: rotate(var(--tilt, 0deg)) scale(var(--lift, 1)) scaleX(var(--fold, 1));
@@ -194,11 +196,11 @@ const combos = [
     else img.addEventListener('load', () => buildMap(img), { once: true });
   });
 
-  // alpha at a client-space point, accounting for the magnet's tilt
-  const alphaAt = (el: HTMLElement, clientX: number, clientY: number): number => {
+  // alpha at a client-space point, given the magnet's already-measured rect
+  // (rect is passed in so a neighborhood probe can reuse one measurement).
+  const alphaAtRect = (el: HTMLElement, r: DOMRect, clientX: number, clientY: number): number => {
     const map = alphaMaps.get(el.dataset.magnet!);
     if (!map) return 255;                      // not ready → treat as solid
-    const r = el.getBoundingClientRect();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     const t = -((parseFloat(el.dataset.tilt || '0')) * Math.PI) / 180;
     const dx = clientX - cx, dy = clientY - cy;
@@ -211,14 +213,39 @@ const combos = [
     const py = Math.min(map.h - 1, Math.floor(v * map.h));
     return map.data[py * map.w + px];
   };
+  const alphaAt = (el: HTMLElement, clientX: number, clientY: number): number =>
+    alphaAtRect(el, el.getBoundingClientRect(), clientX, clientY);
 
-  // topmost magnet whose *pixels* (not bounding box) are under the point
-  const magnetAt = (clientX: number, clientY: number): HTMLElement | null => {
-    for (const node of document.elementsFromPoint(clientX, clientY)) {
-      if (node instanceof HTMLElement && node.classList.contains('magnet')) {
-        if (alphaAt(node, clientX, clientY) > HIT_ALPHA) return node;
+  // Is the point within BUFFER screen-px of the magnet's opaque pixels? This
+  // dilates the grabbable area outward — same outline, a little bigger — so you
+  // don't have to land exactly on thin or steeply-tilted parts. We probe a few
+  // concentric rings around the point; any opaque sample counts as a hit.
+  const GRAB_DIRS = 12;
+  const GRAB_RINGS = [0.5, 1];   // fractions of BUFFER to probe outward
+  const withinBuffer = (el: HTMLElement, clientX: number, clientY: number): boolean => {
+    if (BUFFER <= 0) return false;
+    const r = el.getBoundingClientRect();
+    for (const f of GRAB_RINGS) {
+      const rad = BUFFER * f;
+      for (let i = 0; i < GRAB_DIRS; i++) {
+        const a = (i / GRAB_DIRS) * Math.PI * 2;
+        if (alphaAtRect(el, r, clientX + Math.cos(a) * rad, clientY + Math.sin(a) * rad) > HIT_ALPHA) return true;
       }
     }
+    return false;
+  };
+
+  // topmost magnet under the point, by fixed z. An exact pixel hit always wins,
+  // so the grab buffer can never steal from a magnet you're genuinely on top of;
+  // only when nothing is dead-on do we accept the nearest within-buffer magnet.
+  // We scan all magnets (not elementsFromPoint) because the buffer can reach
+  // just outside a magnet's box, where elementsFromPoint wouldn't list it.
+  const byZDesc = (a: HTMLElement, b: HTMLElement) =>
+    (parseFloat(b.style.zIndex) || 0) - (parseFloat(a.style.zIndex) || 0);
+  const magnetAt = (clientX: number, clientY: number): HTMLElement | null => {
+    const els = Array.from(document.querySelectorAll<HTMLElement>('.magnet')).sort(byZDesc);
+    for (const el of els) if (alphaAt(el, clientX, clientY) > HIT_ALPHA) return el;
+    for (const el of els) if (withinBuffer(el, clientX, clientY)) return el;
     return null;
   };
 
