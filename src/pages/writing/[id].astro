@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from 'astro:content';
 import Canvas from '../../layouts/Canvas.astro';
+import { withBase } from '../../lib/url';
 
 export async function getStaticPaths() {
   const posts = await getCollection('posts', ({ data }) => !data.draft);
@@ -19,6 +20,6 @@ const fmt = (d: Date) =>
     <h1>{post.data.title}</h1>
     <Content />
     <hr />
-    <a href="/writing" class="backlink">← writing</a>
+    <a href={withBase('/writing')} class="backlink">← writing</a>
   </article>
 </Canvas>

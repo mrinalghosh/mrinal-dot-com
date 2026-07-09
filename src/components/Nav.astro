@@ -4,16 +4,24 @@
  * Placeholder until the magnets themselves become the navigation
  * (drag two pieces together -> go somewhere).
  */
-const path = Astro.url.pathname.replace(/\/$/, '') || '/';
+import { withBase } from '../lib/url';
+// Astro.url.pathname includes the base (e.g. /mrinal-dot-com/about), so
+// compare against base-prefixed hrefs. norm() strips the trailing slash so
+// the home link (which is just the base) matches cleanly.
+const norm = (p: string) => p.replace(/\/$/, '') || '/';
+const path = norm(Astro.url.pathname);
+const home = norm(withBase('/'));
 const links = [
-  { href: '/', label: 'home' },
-  { href: '/about', label: 'about' },
-  { href: '/work', label: 'work' },
-  { href: '/writing', label: 'writing' },
-  { href: '/contact', label: 'contact' },
+  { href: withBase('/'), label: 'home' },
+  { href: withBase('/about'), label: 'about' },
+  { href: withBase('/work'), label: 'work' },
+  { href: withBase('/writing'), label: 'writing' },
+  { href: withBase('/contact'), label: 'contact' },
 ];
-const isCurrent = (href: string) =>
-  href === '/' ? path === '/' : path === href || path.startsWith(href + '/');
+const isCurrent = (href: string) => {
+  const h = norm(href);
+  return h === home ? path === home : path === h || path.startsWith(h + '/');
+};
 ---
 
 <nav class="site-nav">
