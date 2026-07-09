@@ -11,11 +11,16 @@
  *         (grabbing does not bring to front), so pairs always assemble the same
  *         way: roof over house, tools over the paper they land on.
  *
- * Combine to navigate: list the parts in `combos` below. When they overlap and
- * you release, the site navigates. `fold: '<id>'` makes that part visually fold
- * (squish) as the pair closes in — a placeholder for real fold art.
+ * The interaction model:
+ *   HOME (/) — every magnet is out and scattered. Bring a tool to the `paper`
+ *     hub so they overlap and release: the site navigates into that section.
+ *   SECTION (/work, /about, …) — only the pair that leads there is shown,
+ *     assembled and parked out of the way; every other magnet fades off. To go
+ *     back, pull the two pieces apart — that navigates home and the rest return.
+ *   So combine = go in (others vanish); pull apart = come out (others return).
  *
- * The concept: `paper` is the hub. Bring a different tool to it to go somewhere.
+ * `fold: '<id>'` makes that part visually fold (squish) as the pair closes in —
+ * a placeholder for real fold art (e.g. paper tucking into an envelope).
  */
 import { withBase } from "../lib/url";
 const magnets = [
@@ -24,8 +29,8 @@ const magnets = [
     id: "house",
     src: "/magnets/house-clean.png",
     alt: "a small stone house",
-    x: 45,
-    y: 37,
+    x: 72.8,
+    y: 36.8,
     w: 155,
     r: -3,
     z: 10,
@@ -45,8 +50,8 @@ const magnets = [
     id: "roof",
     src: "/magnets/roof.png",
     alt: "a stone roof",
-    x: 46,
-    y: 23,
+    x: 74.3,
+    y: 37.2,
     w: 120,
     r: 4,
     z: 20,
@@ -93,11 +98,10 @@ const magnets = [
   },
 ];
 
-// bring the right partner to the paper — each pair leads somewhere.
-// (house + roof is the odd one out: it stays assembled as the home icon,
-//  so spring:false keeps the pieces together after you land on home.)
+// Bring the right partner to the paper — each pair leads somewhere. `paper` is
+// the hub. (house + roof are NOT a combo: they just sit assembled on the home
+// page as a little house; pulling them apart does nothing.)
 const combos = [
-  { parts: ["house", "roof"], href: "/", label: "home", spring: false },
   { parts: ["paper", "scissors"], href: "/work", label: "work" },
   { parts: ["paper", "pencil case"], href: "/writing", label: "writing" },
   {
@@ -114,6 +118,7 @@ const combos = [
   id="magnet-layer"
   transition:persist="magnets"
   aria-label="draggable objects"
+  data-home={withBase("/")}
   data-combos={JSON.stringify(
     combos.map((c) => ({ ...c, href: withBase(c.href) })),
   )}
@@ -158,7 +163,8 @@ const combos = [
       scaleX(var(--fold, 1));
     transition:
       transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1),
-      filter 0.18s ease;
+      filter 0.18s ease,
+      opacity 0.32s ease;
     will-change: transform, left, top;
   }
   /* .hot = pointer is over actual pixels (JS-toggled, not :hover, so the
@@ -166,15 +172,23 @@ const combos = [
   .magnet.hot {
     --lift: 1.02;
   }
+  /* .hidden = not part of the section you're on. Lifts off the fridge and
+     fades out; fades back in (in place) when you return home. */
+  .magnet.hidden {
+    opacity: 0;
+    --lift: 1.12;
+    pointer-events: none;
+  }
   /* .settling = animate a move (left/top are otherwise instant so dragging
-     tracks the finger). Used for the gentle spring-apart after a combine;
-     the slight overshoot gives it a springy settle. */
+     tracks the finger). Used to glide a pair to its parked spot on a section
+     page, and to glide magnets back home — the slight overshoot settles nicely. */
   .magnet.settling {
     transition:
       left 0.55s cubic-bezier(0.34, 1.25, 0.64, 1),
       top 0.55s cubic-bezier(0.34, 1.25, 0.64, 1),
       transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1),
-      filter 0.18s ease;
+      filter 0.18s ease,
+      opacity 0.32s ease;
   }
   .magnet.dragging {
     --lift: 1.05;
@@ -182,7 +196,7 @@ const combos = [
     /* a lift shadow while held (the PNG carries its own resting shadow) */
     filter: drop-shadow(0 12px 16px rgba(30, 26, 20, 0.32));
   }
-  /* armed = release-now-to-navigate */
+  /* armed = release-now-to-navigate (either combine → section, or pull-apart → home) */
   .magnet.armed {
     filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0))
       drop-shadow(0 0 7px rgba(70, 120, 200, 0.85));
@@ -218,7 +232,7 @@ const combos = [
 
   @media (prefers-reduced-motion: reduce) {
     .magnet {
-      transition: none;
+      transition: opacity 0.32s ease;
     }
   }
 </style>
@@ -228,13 +242,16 @@ const combos = [
 
   // Runs once per full page load; the layer element persists across
   // client-side navigations (transition:persist), so state below survives too.
-  const STORE_KEY = "fridge-magnets-v3"; // v3: positions no longer store z (z is fixed in config)
+  const STORE_KEY = "fridge-magnets-v4"; // v4: drop stale test positions after retuning defaults (v3 dropped z)
   const HIT_ALPHA = 60; // a pixel counts as "the object" above this alpha
   const ARM_RATIO = 0.3; // overlap (of the smaller magnet) needed to arm a combo
   const FOLD_MIN = 0.55; // how far a folding part squishes at full overlap
   const BUFFER = 12; // px of slack around each magnet's box, so a combo arms
   // just before the visible edges touch — a forgiving
   // reach that still hugs the outline, not a wide halo
+  const PARK_X = 0.85; // where a section's pair parks (fraction of viewport)
+  const PARK_Y = 0.3; //   — the right gutter, clear of the reading column
+  const PARK_MS = 620; // glide duration to the parked spot / back home
 
   type Pos = { x: number; y: number };
   const load = (): Record<string, Pos> => {
@@ -257,7 +274,6 @@ const combos = [
     href: string;
     label: string;
     fold?: string;
-    spring?: boolean;
   };
   const combos: Combo[] = (() => {
     try {
@@ -266,6 +282,23 @@ const combos = [
       return [];
     }
   })();
+
+  // Which section (if any) the current URL is. Section combo hrefs are already
+  // base-prefixed (see data-combos); location.pathname is too, so compare
+  // directly. Match sub-routes as well (/writing/some-post → writing) so an
+  // article page still shows its pair. No match → we're home.
+  const norm = (p: string) => p.replace(/\/$/, "") || "/";
+  const homeHref = layer.dataset.home || "/";
+  const routeCombo = (): Combo | null => {
+    const here = norm(location.pathname);
+    return (
+      combos.find((c) => {
+        const h = norm(c.href);
+        return here === h || here.startsWith(h + "/");
+      }) || null
+    );
+  };
+  const isHome = () => routeCombo() === null;
 
   const MARGIN = 32;
   const clamp = (el: HTMLElement, x: number, y: number) => {
@@ -365,13 +398,12 @@ const combos = [
   // topmost magnet under the point, by fixed z. An exact pixel hit always wins,
   // so the grab buffer can never steal from a magnet you're genuinely on top of;
   // only when nothing is dead-on do we accept the nearest within-buffer magnet.
-  // We scan all magnets (not elementsFromPoint) because the buffer can reach
-  // just outside a magnet's box, where elementsFromPoint wouldn't list it.
+  // Hidden magnets (not part of the current section) aren't grabbable.
   const byZDesc = (a: HTMLElement, b: HTMLElement) =>
     (parseFloat(b.style.zIndex) || 0) - (parseFloat(a.style.zIndex) || 0);
   const magnetAt = (clientX: number, clientY: number): HTMLElement | null => {
     const els = Array.from(
-      document.querySelectorAll<HTMLElement>(".magnet"),
+      document.querySelectorAll<HTMLElement>(".magnet:not(.hidden)"),
     ).sort(byZDesc);
     for (const el of els)
       if (alphaAt(el, clientX, clientY) > HIT_ALPHA) return el;
@@ -379,20 +411,28 @@ const combos = [
     return null;
   };
 
-  // --- restore saved positions (z stays fixed from config) ---------------
+  // --- restore saved positions & snapshot the home layout ----------------
+  // positions[] (localStorage) is the HOME arrangement: it's only written when
+  // you drag on the home page. homePositions is that same layout in resolved px,
+  // captured now (before any parking) so we can glide a pair back to it on return.
+  const homePositions: Record<string, Pos> = {};
   document.querySelectorAll<HTMLElement>(".magnet").forEach((el) => {
     const p = positions[el.dataset.magnet!];
-    if (!p) return;
-    const c = clamp(el, p.x, p.y);
-    el.style.left = c.x + "px";
-    el.style.top = c.y + "px";
+    if (p) {
+      const c = clamp(el, p.x, p.y);
+      el.style.left = c.x + "px";
+      el.style.top = c.y + "px";
+    }
+    homePositions[el.dataset.magnet!] = { x: el.offsetLeft, y: el.offsetTop };
   });
 
-  // --- combine detection --------------------------------------------------
+  // --- overlap / combine detection ---------------------------------------
   // Overlap as a fraction of the smaller magnet's box. Each box is grown by
   // BUFFER px per side (adding 2*BUFFER to each axis of the intersection is the
   // exact equivalent), so combos reach a touch beyond the visible edges while
-  // the area is still measured against the real, un-inflated magnet size.
+  // the area is still measured against the real, un-inflated magnet size. It
+  // reaches 0 only once there's real daylight (~2*BUFFER) between the boxes —
+  // which is what a "pulled apart" separation checks for.
   const overlapRatio = (a: HTMLElement, b: HTMLElement): number => {
     const ra = a.getBoundingClientRect(),
       rb = b.getBoundingClientRect();
@@ -408,7 +448,7 @@ const combos = [
     return (ix * iy) / minArea;
   };
 
-  // which combo (if any) is satisfied while `el` is being dragged
+  // HOME: which combo (if any) is satisfied while `el` is being dragged.
   const findArmed = (el: HTMLElement): Combo | null => {
     const id = el.dataset.magnet!;
     for (const combo of combos) {
@@ -420,7 +460,18 @@ const combos = [
     return null;
   };
 
-  const setArmed = (combo: Combo | null) => {
+  // SECTION: the pair starts assembled; dragging a piece until the two clear
+  // each other (overlap → 0) arms "pull apart → back".
+  const findSeparate = (el: HTMLElement): Combo | null => {
+    const rc = routeCombo();
+    if (!rc || !rc.parts.includes(el.dataset.magnet!)) return null;
+    const a = magnetEl(rc.parts[0]),
+      b = magnetEl(rc.parts[1]);
+    if (!a || !b) return null;
+    return overlapRatio(a, b) <= 0 ? rc : null;
+  };
+
+  const setArmed = (combo: Combo | null, mode: "combine" | "separate") => {
     document
       .querySelectorAll(".magnet.armed")
       .forEach((m) => m.classList.remove("armed"));
@@ -428,7 +479,8 @@ const combos = [
     if (combo) {
       combo.parts.forEach((p) => magnetEl(p)?.classList.add("armed"));
       if (hint) {
-        hint.textContent = `release → ${combo.label}`;
+        hint.textContent =
+          mode === "separate" ? "pull apart → back" : `release → ${combo.label}`;
         hint.classList.add("show");
       }
     } else if (hint) {
@@ -462,11 +514,67 @@ const combos = [
     }
   };
 
+  // --- move helper: snap or glide a magnet to (x, y) ----------------------
+  const moveTo = (el: HTMLElement, x: number, y: number, glide: boolean) => {
+    const c = clamp(el, x, y);
+    if (!glide) {
+      el.classList.remove("settling");
+      el.style.left = c.x + "px";
+      el.style.top = c.y + "px";
+      return;
+    }
+    el.style.left = el.offsetLeft + "px"; // pin a px baseline (may still be at %)
+    el.style.top = el.offsetTop + "px";
+    void el.offsetWidth; // commit the baseline before transitioning
+    el.classList.add("settling");
+    el.style.left = c.x + "px";
+    el.style.top = c.y + "px";
+    window.setTimeout(() => {
+      if (active === el) return; // user grabbed it mid-glide — leave it alone
+      el.classList.remove("settling");
+    }, PARK_MS);
+  };
+
+  // --- section vs home layout --------------------------------------------
+  // Park a section's pair, assembled (centres stacked), in the right gutter.
+  const parkPair = (combo: Combo, glide: boolean) => {
+    const cx = window.innerWidth * PARK_X;
+    const cy = window.innerHeight * PARK_Y;
+    combo.parts.forEach((id) => {
+      const el = magnetEl(id);
+      if (!el || active === el) return;
+      moveTo(el, cx - el.offsetWidth / 2, cy - el.offsetHeight / 2, glide);
+    });
+  };
+
+  // Entering a section: show only its pair (parked), fade the rest off.
+  const enterSection = (combo: Combo, glide: boolean) => {
+    document.querySelectorAll<HTMLElement>(".magnet").forEach((el) => {
+      const inPair = combo.parts.includes(el.dataset.magnet!);
+      el.classList.toggle("hidden", !inPair);
+      if (!inPair) el.style.removeProperty("--fold");
+    });
+    parkPair(combo, glide);
+    if (combo.fold)
+      magnetEl(combo.fold)?.style.setProperty("--fold", String(FOLD_MIN));
+  };
+
+  // Back home: everything returns to its home spot and fades back in.
+  const showHome = (glide: boolean) => {
+    document.querySelectorAll<HTMLElement>(".magnet").forEach((el) => {
+      el.classList.remove("hidden");
+      el.style.removeProperty("--fold");
+      if (active === el) return;
+      const hp = homePositions[el.dataset.magnet!];
+      if (hp) moveTo(el, hp.x, hp.y, glide);
+    });
+  };
+
   // --- drag ---------------------------------------------------------------
   let active: HTMLElement | null = null;
   let armed: Combo | null = null;
+  let armedMode: "combine" | "separate" = "combine";
   let hovered: HTMLElement | null = null;
-  let pendingSpring: Combo | null = null; // set on combine, consumed on the next page
   let startX = 0,
     startY = 0,
     originX = 0,
@@ -497,7 +605,7 @@ const combos = [
     try {
       el.setPointerCapture(e.pointerId);
     } catch {}
-    el.classList.remove("settling"); // cancel any in-flight spring so drag is instant
+    el.classList.remove("settling"); // cancel any in-flight glide so drag is instant
     el.classList.add("dragging"); // z is fixed in config; grabbing does not reorder
   });
 
@@ -508,9 +616,16 @@ const combos = [
     }
     active.style.left = originX + (e.clientX - startX) + "px";
     active.style.top = originY + (e.clientY - startY) + "px";
-    armed = findArmed(active);
-    setArmed(armed);
-    updateFold(active);
+    if (isHome()) {
+      armed = findArmed(active); // bring a tool to the paper → go in
+      armedMode = "combine";
+      setArmed(armed, "combine");
+      updateFold(active);
+    } else {
+      armed = findSeparate(active); // pull the pair apart → come back out
+      armedMode = "separate";
+      setArmed(armed, "separate");
+    }
   });
 
   const end = () => {
@@ -518,25 +633,41 @@ const combos = [
     const el = active;
     active = null;
     el.classList.remove("dragging");
-    // offsetLeft/Top = resolved px (correct even for a no-move tap, where
-    // style.left is still the default "47%" — parseFloat would teleport it)
-    positions[el.dataset.magnet!] = { x: el.offsetLeft, y: el.offsetTop };
-    save();
     const combo = armed;
+    const mode = armedMode;
     armed = null;
-    setArmed(null);
-    clearFolds(); // reset any fold before it persists across nav
-    if (combo) {
-      if (combo.spring !== false) pendingSpring = combo; // separate them on arrival
-      navigate(combo.href); // combined → go
+    setArmed(null, "combine");
+    if (isHome()) {
+      clearFolds();
+      if (combo && mode === "combine") {
+        // A combine drop is transient — the magnet is on its way into a
+        // section, not being re-homed. Leave its saved home spot untouched so
+        // it returns to its usual place when you come back.
+        navigate(combo.href);
+      } else {
+        // A plain reposition on home: this IS the home layout, so persist it.
+        // offsetLeft/Top = resolved px (correct even for a no-move tap, where
+        // style.left is still the default "45%" — parseFloat would teleport it).
+        const at = { x: el.offsetLeft, y: el.offsetTop };
+        positions[el.dataset.magnet!] = at;
+        homePositions[el.dataset.magnet!] = at;
+        save();
+      }
+    } else if (combo && mode === "separate") {
+      navigate(homeHref); // pulled apart → come home
     }
+    // (section drop without separating: leave the piece where it is)
   };
   document.addEventListener("pointerup", end);
   document.addEventListener("pointercancel", end);
 
-  // keep everything on-screen if the window shrinks
+  // keep everything on-screen if the window shrinks; re-anchor a parked pair
+  // to the (now moved) gutter.
   window.addEventListener("resize", () => {
+    const rc = !active ? routeCombo() : null;
+    if (rc) parkPair(rc, false);
     document.querySelectorAll<HTMLElement>(".magnet").forEach((el) => {
+      if (rc && rc.parts.includes(el.dataset.magnet!)) return; // just parked
       const c = clamp(el, el.offsetLeft, el.offsetTop);
       if (c.x !== el.offsetLeft || c.y !== el.offsetTop) {
         el.style.left = c.x + "px";
@@ -545,52 +676,15 @@ const combos = [
     });
   });
 
-  // --- gentle spring-apart after a combine --------------------------------
-  // A combined pair lands on the new page still overlapping. Ease each piece
-  // just clear of the other along the line between their centers, so the pair
-  // is ready to combine again. Runs once per combine, on the page we arrive at.
-  const SPRING_GAP = 16; // px of daylight to leave between them
-
-  const glideTo = (el: HTMLElement, x: number, y: number) => {
-    const to = clamp(el, x, y);
-    el.style.left = el.offsetLeft + "px"; // pin a px baseline (paper may still be at %)
-    el.style.top = el.offsetTop + "px";
-    void el.offsetWidth; // commit the baseline before transitioning
-    el.classList.add("settling");
-    el.style.left = to.x + "px";
-    el.style.top = to.y + "px";
-    window.setTimeout(() => {
-      if (active === el) return; // user grabbed it mid-glide — leave it alone
-      el.classList.remove("settling");
-      positions[el.dataset.magnet!] = { x: el.offsetLeft, y: el.offsetTop };
-      save();
-    }, 650);
-  };
-
-  const springApart = (combo: Combo) => {
-    if (combo.parts.length !== 2) return;
-    const a = magnetEl(combo.parts[0]),
-      b = magnetEl(combo.parts[1]);
-    if (!a || !b) return;
-    const ra = a.getBoundingClientRect(),
-      rb = b.getBoundingClientRect();
-    let dx = ra.left + ra.width / 2 - (rb.left + rb.width / 2);
-    let dy = ra.top + ra.height / 2 - (rb.top + rb.height / 2);
-    const dist = Math.hypot(dx, dy);
-    const need = (ra.width + rb.width) / 2 + SPRING_GAP - dist; // how far short of clear
-    if (need <= 0) return; // already apart
-    const nx = dist > 1 ? dx / dist : 1; // concentric → go sideways
-    const ny = dist > 1 ? dy / dist : 0;
-    glideTo(a, a.offsetLeft + (nx * need) / 2, a.offsetTop + (ny * need) / 2);
-    glideTo(b, b.offsetLeft - (nx * need) / 2, b.offsetTop - (ny * need) / 2);
-  };
-
-  // fires on first load and after every client navigation; only acts when a
-  // combine set pendingSpring on the way here.
+  // Fires on first load and after every client navigation. Reads the URL and
+  // sets the layout: a section shows its parked pair, home shows everyone.
+  // The first (full) load snaps into place; later (client) navigations glide.
+  let firstLoad = true;
   document.addEventListener("astro:page-load", () => {
-    if (!pendingSpring) return;
-    const combo = pendingSpring;
-    pendingSpring = null;
-    requestAnimationFrame(() => springApart(combo));
+    const glide = !firstLoad;
+    firstLoad = false;
+    const rc = routeCombo();
+    if (rc) enterSection(rc, glide);
+    else showHome(glide);
   });
 </script>
