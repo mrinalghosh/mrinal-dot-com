@@ -139,6 +139,9 @@ const combos = [
   const HIT_ALPHA = 60;     // a pixel counts as "the object" above this alpha
   const ARM_RATIO = 0.3;    // overlap (of the smaller magnet) needed to arm a combo
   const FOLD_MIN = 0.55;    // how far a folding part squishes at full overlap
+  const BUFFER = 12;        // px of slack around each magnet's box, so a combo arms
+                            // just before the visible edges touch — a forgiving
+                            // reach that still hugs the outline, not a wide halo
 
   type Pos = { x: number; y: number };
   const load = (): Record<string, Pos> => {
@@ -229,10 +232,14 @@ const combos = [
   });
 
   // --- combine detection --------------------------------------------------
+  // Overlap as a fraction of the smaller magnet's box. Each box is grown by
+  // BUFFER px per side (adding 2*BUFFER to each axis of the intersection is the
+  // exact equivalent), so combos reach a touch beyond the visible edges while
+  // the area is still measured against the real, un-inflated magnet size.
   const overlapRatio = (a: HTMLElement, b: HTMLElement): number => {
     const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-    const ix = Math.max(0, Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left));
-    const iy = Math.max(0, Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top));
+    const ix = Math.max(0, Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left) + 2 * BUFFER);
+    const iy = Math.max(0, Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top) + 2 * BUFFER);
     const minArea = Math.min(ra.width * ra.height, rb.width * rb.height) || 1;
     return (ix * iy) / minArea;
   };
